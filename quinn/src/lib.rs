@@ -399,6 +399,7 @@ impl ClientConfigBuilder {
             .root_store
             .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
         config.versions = vec![ProtocolVersion::TLSv1_3];
+        config.enable_early_data = true;
         Self { config }
     }
 

@@ -75,6 +75,7 @@ fn run(log: Logger, options: Opt) -> Result<()> {
         .dangerous()
         .set_certificate_verifier(Arc::new(InteropVerifier(state.clone())));
     tls_config.alpn_protocols = vec![str::from_utf8(quinn::ALPN_QUIC_HTTP).unwrap().into()];
+    tls_config.enable_early_data = true;
     if options.keylog {
         tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
     }
