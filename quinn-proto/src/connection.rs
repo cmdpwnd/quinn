@@ -83,6 +83,7 @@ pub struct Connection {
     prev_crypto: Option<PrevCrypto>,
     /// Latest PATH_CHALLENGE token issued to the peer along the current path
     path_challenge: Option<u64>,
+    accepted_0rtt: bool,
 
     //
     // Queued non-retransmittable 1-RTT data
@@ -219,6 +220,7 @@ impl Connection {
             highest_space: SpaceId::Initial,
             prev_crypto: None,
             path_challenge: None,
+            accepted_0rtt: false,
 
             path_challenge_pending: false,
             ping_pending: false,
@@ -845,6 +847,7 @@ impl Connection {
                 header: packet.header_crypto(),
                 packet,
             });
+            self.accepted_0rtt = true;
         }
     }
 
@@ -1180,6 +1183,10 @@ impl Connection {
                                         .map_err(Into::into)
                                 })?;
                             self.set_params(params)?;
+
+                            if !self.tls.as_client().is_early_data_accepted() {
+                                self.reject_0rtt();
+                            }
 
                             // Server applications don't see connections until the handshake
                             // completes, so this would be redundant.
@@ -2569,6 +2576,10 @@ impl Connection {
         self.state.is_closed()
     }
 
+    pub fn accepted_0rtt(&self) -> bool {
+        self.accepted_0rtt
+    }
+
     pub fn has_1rtt(&self) -> bool {
         self.spaces[SpaceId::Data as usize].crypto.is_some()
     }
@@ -2649,6 +2660,30 @@ impl Connection {
             || self.ping_pending
             || self.path_response.is_some()
             || !self.offpath_responses.is_empty()
+    }
+
+    /// Reset state to account for 0-RTT being ignored by the server
+    fn reject_0rtt(&mut self) {
+        debug_assert!(self.side.is_client());
+        debug!(self.log, "0-RTT rejected");
+        self.accepted_0rtt = false;
+        // Reset all outgoing streams
+        for (id, stream) in &mut self.streams.streams {
+            if id.initiator() != self.side {
+                continue;
+            }
+            *stream.send_mut().unwrap() = stream::Send::new();
+        }
+        // Discard 0-RTT packets
+        let sent_packets = mem::replace(
+            &mut self.space_mut(SpaceId::Data).sent_packets,
+            BTreeMap::new(),
+        );
+        for (_, packet) in sent_packets {
+            self.in_flight.remove(&packet);
+        }
+        self.data_sent = 0;
+        self.blocked_streams.clear();
     }
 }
 
